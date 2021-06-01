@@ -47,7 +47,7 @@ Then you can run `PATH="$(pwd)/protoc/bin:$PATH" make`
 
 ## Using [Nix](https://nixos.org/guides/install-nix.html)
 
-```sh
+```bash
 nix-shell shell.nix
 make
 ```
