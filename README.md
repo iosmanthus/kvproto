@@ -29,6 +29,7 @@ The easiest way to compile the protobufs is to use docker.
 
 # Multiple `protoc` Versions
 
+## Manually
 If you need to override your version of `protoc` because you have a later version you can install the correct version like so:
 
 ```bash
@@ -44,3 +45,9 @@ rm protoc.zip
 
 Then you can run `PATH="$(pwd)/protoc/bin:$PATH" make`
 
+## Using [Nix](https://nixos.org/guides/install-nix.html)
+
+```sh
+nix-shell shell.nix
+make
+```
