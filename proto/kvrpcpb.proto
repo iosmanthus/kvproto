@@ -76,6 +76,16 @@ message ScanResponse {
 // TiKV will write the data in a preliminary state. Data cannot be read until it has been committed.
 // The client should only commit a transaction once all prewrites succeed.
 message PrewriteRequest {
+    // What kind of checks need to be performed for keys in a pessimistic transaction.
+    enum PessimisticAction {
+        // The key needn't be locked and no extra write conflict checks are needed.
+        SKIP_PESSIMISTIC_CHECK = 0;
+        // The key should have been locked at the time of prewrite.
+        DO_PESSIMISTIC_CHECK = 1;
+        // The key doesn't need a pessimistic lock. But we need to do data constraint checks.
+        DO_CONSTRAINT_CHECK = 2;
+    }
+
     Context context = 1;
     // The data to be written to the database.
     repeated Mutation mutations = 2;
@@ -89,7 +99,8 @@ message PrewriteRequest {
     // TiKV can skip some checks, used for speeding up data migration.
     bool skip_constraint_check = 6;
     // For pessimistic transaction, some mutations don't need to be locked, for example, non-unique index key.
-    repeated bool is_pessimistic_lock = 7;
+    // Keys with deferred constraint checks are not locked.
+    repeated PessimisticAction pessimistic_actions = 7;
     // How many keys this transaction involves in this region.
     uint64 txn_size = 8;
     // For pessimistic transactions only; used to check if a conflict lock is already committed.
@@ -122,6 +133,8 @@ message PrewriteResponse {
     // the commit ts of the transaction. Otherwise, if TiKV failed to commit it with 1PC or the
     // transaction is not 1PC, the value will be 0.
     uint64 one_pc_commit_ts = 4;
+    // Execution details about the request processing.
+    ExecDetailsV2 exec_details_v2 = 5;
 }
 
 // Lock a set of keys to prepare to write to them.
@@ -158,6 +171,8 @@ message PessimisticLockRequest {
     // `return_values` is set, it simply makes no difference; otherwise, the `value` field of the
     // repsonse will be empty while the `not_founds` field still indicates the keys' existence.
     bool check_existence = 12;
+    // TiKV lock the record only when it exists
+    bool lock_only_if_exists = 13;
 }
 
 message PessimisticLockResponse {
@@ -173,6 +188,8 @@ message PessimisticLockResponse {
     // In legacy TiKV, this field is not used even 'force' is false. In that case, an empty value indicates
     // two possible situations: (1) the key does not exist. (2) the key exists but the value is empty.
     repeated bool not_founds = 6;
+    // Execution details about the request processing.
+    ExecDetailsV2 exec_details_v2 = 7;
 }
 
 // Unlock keys locked using `PessimisticLockRequest`.
@@ -186,6 +203,8 @@ message PessimisticRollbackRequest {
 message PessimisticRollbackResponse {
     errorpb.Error region_error = 1;
     repeated KeyError errors = 2;
+    // Execution details about the request processing.
+    ExecDetailsV2 exec_details_v2 = 3;
 }
 
 // Used to update the lock_ttl of a psessimistic and/or large transaction to prevent it from been killed.
@@ -204,6 +223,8 @@ message TxnHeartBeatResponse {
     KeyError error = 2;
     // The TTL actually set on the requested lock.
     uint64 lock_ttl = 3;
+    // Execution details about the request processing.
+    ExecDetailsV2 exec_details_v2 = 4;
 }
 
 // CheckTxnStatusRequest checks the status of a transaction.
@@ -247,6 +268,8 @@ message CheckTxnStatusResponse {
     // The action performed by TiKV (and why if the action is to rollback).
     Action action = 5;
     LockInfo lock_info = 6;
+    // Execution details about the request processing.
+    ExecDetailsV2 exec_details_v2 = 7;
 }
 
 // Part of the async commit protocol, checks for locks on all supplied keys. If a lock is missing,
@@ -269,6 +292,8 @@ message CheckSecondaryLocksResponse {
     // If any of the locks have been committed, this is the commit ts used. If no
     // locks have been committed, it will be zero.
     uint64 commit_ts = 4;
+    // Execution details about the request processing.
+    ExecDetailsV2 exec_details_v2 = 5;
 }
 
 // The second phase of writing to TiKV. If there are no errors or conflicts, then this request
@@ -290,6 +315,8 @@ message CommitResponse {
     KeyError error = 2;
     // If the commit ts is derived from min_commit_ts, this field should be set.
     uint64 commit_version = 3;
+    // Execution details about the request processing.
+    ExecDetailsV2 exec_details_v2 = 4;
 }
 
 // Not yet implemented.
@@ -354,6 +381,8 @@ message BatchRollbackRequest {
 message BatchRollbackResponse {
     errorpb.Error region_error = 1;
     KeyError error = 2;
+    // Execution details about the request processing.
+    ExecDetailsV2 exec_details_v2 = 3;
 }
 
 // Scan the database for locks. Used at the start of the GC process to find all
@@ -375,6 +404,8 @@ message ScanLockResponse {
     KeyError error = 2;
     // Info on all locks found by the scan.
     repeated LockInfo locks = 3;
+    // Execution details about the request processing.
+    ExecDetailsV2 exec_details_v2 = 4;
 }
 
 // For all keys locked by the transaction identified by `start_version`, either
@@ -393,6 +424,8 @@ message ResolveLockRequest {
 message ResolveLockResponse {
     errorpb.Error region_error = 1;
     KeyError error = 2;
+    // Execution details about the request processing.
+    ExecDetailsV2 exec_details_v2 = 3;
 }
 
 // Request TiKV to garbage collect all non-current data older than `safe_point`.
@@ -419,6 +452,22 @@ message DeleteRangeRequest {
 }
 
 message DeleteRangeResponse {
+    errorpb.Error region_error = 1;
+    string error = 2;
+}
+
+message FlashbackToVersionRequest {
+    Context context = 1;
+    // The TS version which the data should flashback to.
+    uint64 version = 2;
+    bytes start_key = 3;
+    bytes end_key = 4;
+    // The `start_ts`` and `commit_ts` which the newly written MVCC version will use.
+    uint64 start_ts = 5;
+    uint64 commit_ts = 6;
+}
+
+message FlashbackToVersionResponse {
     errorpb.Error region_error = 1;
     string error = 2;
 }
@@ -716,6 +765,10 @@ message Context {
 
     // The informantion to trace a request sent to TiKV.
     tracepb.TraceContext trace_context = 23;
+
+    // The source of the request, will be used as the tag of the metrics reporting.
+    // This field can be set for any requests that require to report metrics with any extra labels.
+    string request_source = 24;
 }
 
 // The API version the server and the client is using.
@@ -796,11 +849,21 @@ message KeyError {
 }
 
 message WriteConflict {
+    enum Reason {
+        Unknown = 0;
+        Optimistic = 1; // in optimistic transactions.
+        PessimisticRetry = 2; // a lock acquisition request waits for a lock and awakes, or meets a newer version of data, let TiDB retry.
+        SelfRolledBack = 3; // the transaction itself has been rolled back when it tries to prewrite.
+        RcCheckTs = 4; // RcCheckTs failure by meeting a newer version, let TiDB retry.
+        LazyUniquenessCheck = 5; // write conflict found in lazy uniqueness check in pessimistic transactions.
+    }
+
     uint64 start_ts = 1;
     uint64 conflict_ts = 2;
     bytes key = 3;
     bytes primary = 4;
     uint64 conflict_commit_ts = 5;
+    Reason reason = 6;
 }
 
 message AlreadyExist {
@@ -859,16 +922,18 @@ enum DiskFullOpt {
 
 message TimeDetail {
     // Off-cpu wall time elapsed in TiKV side. Usually this includes queue waiting time and
-    // other kind of waitings in series.
-    int64 wait_wall_time_ms = 1;
+    // other kind of waitings in series. (Wait time in the raftstore is not included.)
+    uint64 wait_wall_time_ms = 1;
     // Off-cpu and on-cpu wall time elapsed to actually process the request payload. It does not
     // include `wait_wall_time`.
     // This field is very close to the CPU time in most cases. Some wait time spend in RocksDB
     // cannot be excluded for now, like Mutex wait time, which is included in this field, so that
     // this field is called wall time instead of CPU time.
-    int64 process_wall_time_ms = 2;
+    uint64 process_wall_time_ms = 2;
     // KV read wall Time means the time used in key/value scan and get.
-    int64 kv_read_wall_time_ms = 3;
+    uint64 kv_read_wall_time_ms = 3;
+    // Total wall clock time spent on this RPC in TiKV .
+    uint64 total_rpc_wall_time_ns = 4;
 }
 
 message ScanInfo {
@@ -918,6 +983,21 @@ message ScanDetailV2 {
 
     // Total number of bytes from block reads.
     uint64 rocksdb_block_read_byte = 7;
+
+    // Total time used for block reads.
+    uint64 rocksdb_block_read_nanos = 9;
+
+    // Time used for getting a raftstore snapshot (including proposing read index, leader confirmation and getting the RocksDB snapshot).
+    uint64 get_snapshot_nanos = 10;
+
+    // Time used for proposing read index from read pool to store pool, equals 0 when performing lease read.
+    uint64 read_index_propose_wait_nanos = 11;
+
+    // Time used for leader confirmation, equals 0 when performing lease read.
+    uint64 read_index_confirm_wait_nanos = 12;
+
+    // Time used for read pool scheduling.
+    uint64 read_pool_schedule_wait_nanos = 13;
 }
 
 message ExecDetails {
@@ -938,6 +1018,62 @@ message ExecDetailsV2 {
 
     // Available when ctx.record_scan_stat = true or meet slow query.
     ScanDetailV2 scan_detail_v2 = 2;
+
+    // Raftstore writing durations of the request. Only available for some write requests.
+    WriteDetail write_detail = 3;
+}
+
+message WriteDetail {
+    // Wait duration in the store loop.
+    uint64 store_batch_wait_nanos = 1;
+
+    // Wait duration before sending proposal to peers.
+    uint64 propose_send_wait_nanos = 2;
+
+    // Total time spent on persisting the log.
+    uint64 persist_log_nanos = 3;
+
+    // Wait time until the Raft log write leader begins to write.
+    uint64 raft_db_write_leader_wait_nanos = 4;
+
+    // Time spent on synchronizing the Raft log to the disk.
+    uint64 raft_db_sync_log_nanos = 5;
+
+    // Time spent on writing the Raft log to the Raft memtable.
+    uint64 raft_db_write_memtable_nanos = 6;
+
+    // Time waiting for peers to confirm the proposal (counting from the instant when the leader sends the proposal message).
+    uint64 commit_log_nanos = 7;
+
+    // Wait duration in the apply loop.
+    uint64 apply_batch_wait_nanos = 8;
+
+    // Total time spend to applying the log.
+    uint64 apply_log_nanos = 9;
+
+    // Wait time until the KV RocksDB lock is acquired.
+    uint64 apply_mutex_lock_nanos = 10;
+
+    // Wait time until becoming the KV RocksDB write leader.
+    uint64 apply_write_leader_wait_nanos = 11;
+
+    // Time spent on writing the KV DB WAL to the disk.
+    uint64 apply_write_wal_nanos = 12;
+
+    // Time spent on writing to the memtable of the KV RocksDB.
+    uint64 apply_write_memtable_nanos = 13;
+
+    // Time spent on waiting in the latch.
+    uint64 latch_wait_nanos = 14;
+
+    // Processing time in the transaction layer.
+    uint64 process_nanos = 15;
+
+    // Wait time because of the scheduler flow control or quota limiter throttling.
+    uint64 throttle_nanos = 16;
+
+    // Wait time in the waiter manager for pessimistic locking.
+    uint64 pessimistic_lock_wait_nanos = 17;
 }
 
 message KvPair {
@@ -1110,6 +1246,18 @@ message GetLockWaitInfoRequest {
 }
 
 message GetLockWaitInfoResponse {
+    errorpb.Error region_error = 1;
+    string error = 2;
+    repeated deadlock.WaitForEntry entries = 3;
+}
+
+message GetLockWaitHistoryRequest {
+    Context context = 1;
+    // TODO: There may need some filter options to be used on conditional querying, e.g., finding
+    // the lock waiting status for some specified transaction.
+}
+
+message GetLockWaitHistoryResponse {
     errorpb.Error region_error = 1;
     string error = 2;
     repeated deadlock.WaitForEntry entries = 3;
