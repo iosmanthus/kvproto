@@ -354,6 +354,8 @@ message BatchGetRequest {
     Context context = 1;
     repeated bytes keys = 2;
     uint64 version = 3;
+    // MultiGet batch size
+    uint64 batch_size = 4;
 }
 
 message BatchGetResponse {
