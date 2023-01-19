@@ -110,11 +110,12 @@ message WatchGlobalConfigRequest {
 message WatchGlobalConfigResponse {
     repeated GlobalConfigItem changes = 1;
     int64 revision = 2;
+    ResponseHeader header = 3;
 }
 
 message StoreGlobalConfigRequest {
-    string config_path = 1;
-    repeated GlobalConfigItem changes = 2;
+    repeated GlobalConfigItem changes = 1;
+    string config_path = 2;
 }
 
 message StoreGlobalConfigResponse {
@@ -122,7 +123,8 @@ message StoreGlobalConfigResponse {
 }
 
 message LoadGlobalConfigRequest {
-    string config_path = 1;
+    repeated string names = 1;
+    string config_path = 2;
 }
 
 message LoadGlobalConfigResponse {
@@ -130,16 +132,16 @@ message LoadGlobalConfigResponse {
     int64 revision = 2;
 }
 
-enum ItemKind {
+enum EventType {
     PUT     = 0;
     DELETE  = 1;
 }
 
 message GlobalConfigItem {
-    ItemKind kind = 1;
-    string name = 2;
-    string value = 3;
-    Error error = 4;
+    string name = 1;
+    string value = 2;
+    Error error = 3;
+    EventType kind = 4;
 }
 
 message RequestHeader {
@@ -167,6 +169,8 @@ enum ErrorType {
     DUPLICATED_ENTRY = 8;
     ENTRY_NOT_FOUND = 9;
     INVALID_VALUE = 10;
+    // required watch revision is smaller than current compact/min revision.
+    DATA_COMPACTED = 11;
 }
 
 message Error {
