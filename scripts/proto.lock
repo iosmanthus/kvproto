@@ -11774,6 +11774,11 @@
                 "type": "string"
               },
               {
+                "id": 30,
+                "name": "secure_address",
+                "type": "string"
+              },
+              {
                 "id": 8,
                 "name": "git_hash",
                 "type": "string"
