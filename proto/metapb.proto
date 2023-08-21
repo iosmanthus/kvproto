@@ -55,6 +55,8 @@ message Store {
     string peer_address = 6;
     // Status address provides the HTTP service for external components
     string status_address = 7;
+    // Secure address provides the secure service for client.
+    string secure_address = 30;
     string git_hash = 8;
     // The start timestamp of the current store
     int64 start_timestamp = 9;
